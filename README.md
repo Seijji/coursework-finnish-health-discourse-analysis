@@ -4,6 +4,14 @@ Coursework for **Advanced Text Analysis Techniques in Health Sciences**
 
 Analysis of Finnish online forum discourse using Word2Vec semantic analysis and LDA topic modeling. Focus on health-related vocabulary in Finnish Language Bank concordance data.
 
+## Requirements
+
+- Python 3.9+
+- Stanza (Finnish model)
+- gensim, pandas, numpy, matplotlib, seaborn, scikit-learn
+
+Tested on Arch Linux using venv.
+
 ## Project Structure
 
 ```
@@ -91,14 +99,6 @@ Open `analysis/output/analysis_report.html` in browser
 - **Collocation analysis** - Context window co-occurrence patterns
 - **Keyness analysis** - Log-likelihood distinctive vocabulary per topic
 - **Interactive HTML reports** - All visualizations and results
-
-## Requirements
-
-- Python 3.9+
-- Stanza (Finnish model)
-- gensim, pandas, numpy, matplotlib, seaborn, scikit-learn
-
-Tested on Arch Linux using venv.
 
 ## Course Context
 
