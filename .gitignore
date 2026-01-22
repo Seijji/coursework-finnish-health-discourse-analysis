@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Output files
+analysis/output/
+*.png
+*.html
+*.model
+*.model.*
+*.npy
+
+# Data files (not included in repo)
+text/
+lemmatization/combined.txt
+lemmatization/concordance.txt
+analysis/lemmatized.txt
+
+# Backup and temp files
+*.backup
+*.kate-swp
+.*.swp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Stanza models
+stanza_resources/
