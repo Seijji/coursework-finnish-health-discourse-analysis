@@ -10,12 +10,11 @@ Analysis of Finnish online forum discourse using Word2Vec semantic analysis and 
 coursework-finnish-health-discourse-analysis/
 ├── lemmatization/        # Finnish text lemmatization
 │   └── lemmaus.py        # Stanza-based lemmatizer
-├── analysis/             # Discourse analysis pipeline
-│   ├── analyze.py        # Main analysis script
-│   ├── report_builder.py # HTML report generator
-│   ├── stopwords.txt     # Finnish stop words
-│   └── output/           # Output files
-└── text/                 # Source concordance data
+└── analysis/             # Discourse analysis pipeline
+    ├── analyze.py        # Main analysis script
+    ├── report_builder.py # HTML report generator
+    ├── stopwords.txt     # Finnish stop words
+    └── output/           # Output files (generated)
 ```
 
 ## Quick Start
