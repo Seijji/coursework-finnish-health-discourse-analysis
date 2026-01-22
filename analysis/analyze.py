@@ -148,20 +148,50 @@ def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
     
     colors = [word_topics.get(w, -1) for w in top_words]
     
-    fig, ax = plt.subplots(figsize=(14, 10))
-    scatter = ax.scatter(coords[:, 0], coords[:, 1], c=colors, cmap='tab10', alpha=0.6, s=50)
+    fig, ax = plt.subplots(figsize=(20, 16))
     
-    # Annotate target and similar words
-    annotate = [target] + [w for w, _ in similar[:15]]
-    for w in annotate:
-        if w in top_words:
+    # Show only top 50 words for maximum clarity
+    show_n = min(50, len(top_words))
+    scatter = ax.scatter(coords[:show_n, 0], coords[:show_n, 1], 
+                        c=colors[:show_n], cmap='tab10', 
+                        alpha=0.4, s=120, edgecolors='black', linewidths=1)
+    
+    # Annotate target word very prominently
+    if target in top_words[:show_n]:
+        idx = top_words.index(target)
+        ax.scatter(coords[idx, 0], coords[idx, 1], c='red', s=600, marker='*', 
+                  edgecolors='black', linewidths=4, zorder=10)
+        ax.annotate(target, (coords[idx, 0], coords[idx, 1]),
+                   fontsize=22, fontweight='bold', color='darkred',
+                   bbox=dict(boxstyle='round,pad=0.8', facecolor='yellow', 
+                            alpha=0.95, edgecolor='red', linewidth=3),
+                   zorder=11, ha='center')
+    
+    # Annotate top similar words clearly
+    for i, (w, score) in enumerate(similar[:12], 1):
+        if w in top_words[:show_n]:
             idx = top_words.index(w)
             ax.annotate(w, (coords[idx, 0], coords[idx, 1]),
-                       fontsize=9 if w == target else 7,
-                       fontweight='bold' if w == target else 'normal', alpha=0.8)
+                       fontsize=14, fontweight='normal', 
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', 
+                                alpha=0.85, edgecolor='navy', linewidth=1.5),
+                       zorder=9)
     
-    ax.set_title('Word2Vec Semantic Space (t-SNE, colored by topic)', fontsize=14, fontweight='bold')
-    plt.colorbar(scatter, ax=ax, label='Topic')
+    # Label remaining words
+    annotated = [target] + [w for w, _ in similar[:12]]
+    for i, w in enumerate(top_words[:show_n]):
+        if w not in annotated:
+            ax.text(coords[i, 0], coords[i, 1], w, 
+                   fontsize=11, alpha=0.7, ha='center', va='center',
+                   fontweight='normal')
+    
+    ax.set_title(f'Word2Vec Semantic Space: "{target}" and Similar Words\n' + 
+                f'Top {show_n} most frequent words (colored by topic)',
+                fontsize=18, fontweight='bold', pad=20)
+    ax.set_xlabel('t-SNE Dimension 1', fontsize=16)
+    ax.set_ylabel('t-SNE Dimension 2', fontsize=16)
+    ax.grid(True, alpha=0.4, linewidth=1.5, linestyle='-')
+    plt.colorbar(scatter, ax=ax, label='Topic ID', shrink=0.8)
     plt.tight_layout()
     plt.savefig(f'{out_dir}/word2vec_tsne.png', dpi=300, bbox_inches='tight')
     plt.close()
