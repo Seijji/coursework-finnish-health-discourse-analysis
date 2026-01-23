@@ -28,18 +28,15 @@ coursework-finnish-health-discourse-analysis/
 ## Quick Start
 
 ### Installation
+Installation instruction assume ArchLinux system. On test system ROCm torch was used with python -m venv --system-site-packages venv due to rocm usage instead of CUDA.
 
 ```bash
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # or `venv/bin/activate` on some systems
+source venv/bin/activate
 
 # Install dependencies
-cd lemmatization
-pip install stanza
-
-cd ../analysis
-pip install gensim pandas numpy matplotlib seaborn scikit-learn
+pip install stanza gensim pandas numpy matplotlib seaborn scikit-learn
 ```
 
 ### Usage
