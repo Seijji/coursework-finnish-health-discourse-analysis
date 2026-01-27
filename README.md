@@ -56,6 +56,16 @@ python analyze.py -i lemmatized.txt -t rokotevastaisuus -o output
 **3. View results:**
 Open `analysis/output/analysis_report.html` in browser
 
+**Optional - Generate PowerPoint-ready images:**
+```bash
+python analyze.py -i lemmatized.txt -t rokotevastaisuus -o output --ppt-format
+```
+
+**Optional - Reuse existing models (skip training):**
+```bash
+python analyze.py -t rokotevastaisuus -o output --load-models --ppt-format
+```
+
 ## Command-Line Arguments
 
 ### Lemmatization (`lemmaus.py`)
@@ -82,6 +92,8 @@ Open `analysis/output/analysis_report.html` in browser
 - `--min-count`: Minimum word frequency for Word2Vec vocabulary (default: 10, higher = smaller vocab)
 - `--window`: Context window size for Word2Vec and collocations (default: 5, typical: 3-10)
 - `--top-words`: Number of words to visualize in t-SNE plot (default: 200)
+- `--ppt-format`: Generate 16:10 aspect ratio images for PowerPoint presentations
+- `--load-models`: Load existing trained models instead of retraining (requires model files in output directory)
 
 ## Features
 
@@ -96,6 +108,29 @@ Open `analysis/output/analysis_report.html` in browser
 - **Collocation analysis** - Context window co-occurrence patterns
 - **Keyness analysis** - Log-likelihood distinctive vocabulary per topic
 - **Interactive HTML reports** - All visualizations and results
+- **PowerPoint export** - Optional 16:10 aspect ratio images for presentations
+- **Model persistence** - Save and reload trained models for faster iteration
+
+### PowerPoint Format (`--ppt-format`)
+When enabled, generates additional 16:10 aspect ratio versions of all visualizations optimized for presentation slides:
+- `word2vec_tsne_16x10.png` - Semantic space visualization (19.2×12 inches, 300 DPI)
+- `lda_topics_16x10.png` - Topic word distributions (16×10 inches)
+- `collocations_16x10.png` - Co-occurrence patterns (16×10 inches)
+- `keyness_heatmap_16x10.png` - Distinctive vocabulary heatmap (16×10 inches)
+- `topic_distribution_16x10.png` - Document-topic distribution (16×10 inches)
+
+Original square/vertical aspect ratio images are still generated alongside the 16:10 versions.
+
+### Model Loading (`--load-models`)
+Loads previously trained Word2Vec and LDA models from the output directory instead of retraining. Useful for:
+- Regenerating visualizations with different parameters (`--top-words`, `--ppt-format`)
+- Creating presentation versions after initial analysis
+- Experimenting with visualization settings without waiting for model training
+- Analyzing different target words using the same trained models
+
+**Requirements:** 
+- `{target}_w2v.model` and `{target}_lda.model` must exist in the output directory
+- Input file must be provided for corpus reconstruction
 
 ## Course Context
 

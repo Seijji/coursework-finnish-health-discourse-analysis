@@ -35,6 +35,8 @@ def parse_args():
     parser.add_argument('--min-count', type=int, default=10, help='Min word count for vocab')
     parser.add_argument('--window', type=int, default=5, help='Context window size')
     parser.add_argument('--top-words', type=int, default=200, help='Top N words for t-SNE viz')
+    parser.add_argument('--ppt-format', action='store_true', help='Generate 16:10 aspect ratio images for PowerPoint')
+    parser.add_argument('--load-models', action='store_true', help='Load existing models instead of retraining')
     return parser.parse_args()
 
 
@@ -46,7 +48,7 @@ def load_data(input_file, stopwords_file):
         with open(stopwords_file, 'r') as f:
             stops = set(line.strip().lower() for line in f if line.strip())
         print(f"Loaded {len(stops)} stop words")
-    
+
     # Load and filter sentences
     sents = []
     with open(input_file, 'r') as f:
@@ -56,8 +58,33 @@ def load_data(input_file, stopwords_file):
                 tokens = [t for t in tokens if t.lower() not in stops]
             if len(tokens) > 3:
                 sents.append(tokens)
-    
+
     return sents, stops
+
+
+def load_models(out_dir, target, sents):
+    """Load existing Word2Vec and LDA models from disk."""
+    print(f"\nLoading existing models from {out_dir}...")
+
+    w2v_path = f'{out_dir}/{target}_w2v.model'
+    lda_path = f'{out_dir}/{target}_lda.model'
+
+    if not os.path.exists(w2v_path):
+        raise FileNotFoundError(f"Word2Vec model not found: {w2v_path}")
+    if not os.path.exists(lda_path):
+        raise FileNotFoundError(f"LDA model not found: {lda_path}")
+
+    w2v = Word2Vec.load(w2v_path)
+    print(f"Loaded W2V model, vocab size: {len(w2v.wv)}")
+
+    lda = LdaModel.load(lda_path)
+    print(f"Loaded LDA model with {lda.num_topics} topics")
+
+    # Reconstruct dictionary and corpus from loaded LDA model
+    dictionary = lda.id2word
+    corpus = [dictionary.doc2bow(s) for s in sents]
+
+    return w2v, lda, dictionary, corpus
 
 
 def train_models(sents, n_topics, window, min_count):
@@ -66,17 +93,17 @@ def train_models(sents, n_topics, window, min_count):
     w2v = Word2Vec(sents, vector_size=100, window=window, min_count=min_count,
                    workers=4, sg=1, epochs=10, seed=42)
     print(f"W2V vocab size: {len(w2v.wv)}")
-    
+
     print(f"Training LDA with {n_topics} topics...")
     dictionary = Dictionary(sents)
     dictionary.filter_extremes(no_below=5, no_above=0.5)
     corpus = [dictionary.doc2bow(s) for s in sents]
-    
+
     # Using symmetric priors to avoid dtype issues with 'auto'
     lda = LdaModel(corpus=corpus, id2word=dictionary, num_topics=n_topics,
-                   random_state=42, passes=10, alpha='symmetric', 
+                   random_state=42, passes=10, alpha='symmetric',
                    eta='symmetric', per_word_topics=True)
-    
+
     return w2v, lda, dictionary, corpus
 
 
@@ -99,43 +126,43 @@ def calc_keyness(sents, doc_topics, n_topics):
     for i, s in enumerate(sents):
         if i < len(doc_topics) and doc_topics[i] >= 0:
             topic_words[doc_topics[i]].extend(s)
-    
+
     results = []
     total = sum(len(words) for words in topic_words.values())
     all_words = Counter()
     for words in topic_words.values():
         all_words.update(words)
-    
+
     for tid, words in topic_words.items():
         topic_counter = Counter(words)
         n_topic = len(words)
-        
+
         for word in topic_counter.most_common(50):
             w = word[0]
             obs = topic_counter[w]
             exp = (n_topic / total) * all_words[w]
-            
+
             if obs > 0 and exp > 0:
                 ll = 2 * (obs * np.log(obs / exp))
                 results.append({'topic': tid, 'word': w, 'keyness': ll, 'freq': obs})
-    
+
     return pd.DataFrame(results)
 
 
-def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df, 
+def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
                doc_topics, args, out_dir):
     """Generate all visualization plots (t-SNE, topics, collocations, keyness, distribution)."""
     n_topics = args.topics
-    
+
     # 1. t-SNE word embedding plot
     print("Creating t-SNE plot...")
     vocab_freq = [(w, w2v.wv.get_vecattr(w, "count")) for w in w2v.wv.index_to_key]
     top_words = [w for w, _ in sorted(vocab_freq, key=lambda x: x[1], reverse=True)[:args.top_words]]
-    
+
     vecs = np.array([w2v.wv[w] for w in top_words])
     tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
     coords = tsne.fit_transform(vecs)
-    
+
     # Color by topic
     word_topics = {}
     for w in top_words:
@@ -145,47 +172,47 @@ def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
             word_topics[w] = max(tprobs, key=lambda x: x[1])[0] if tprobs else -1
         else:
             word_topics[w] = -1
-    
+
     colors = [word_topics.get(w, -1) for w in top_words]
-    
+
     fig, ax = plt.subplots(figsize=(20, 16))
-    
+
     # Show only top 50 words for maximum clarity
     show_n = min(50, len(top_words))
-    scatter = ax.scatter(coords[:show_n, 0], coords[:show_n, 1], 
-                        c=colors[:show_n], cmap='tab10', 
+    scatter = ax.scatter(coords[:show_n, 0], coords[:show_n, 1],
+                        c=colors[:show_n], cmap='tab10',
                         alpha=0.4, s=120, edgecolors='black', linewidths=1)
-    
+
     # Annotate target word very prominently
     if target in top_words[:show_n]:
         idx = top_words.index(target)
-        ax.scatter(coords[idx, 0], coords[idx, 1], c='red', s=600, marker='*', 
+        ax.scatter(coords[idx, 0], coords[idx, 1], c='red', s=600, marker='*',
                   edgecolors='black', linewidths=4, zorder=10)
         ax.annotate(target, (coords[idx, 0], coords[idx, 1]),
                    fontsize=22, fontweight='bold', color='darkred',
-                   bbox=dict(boxstyle='round,pad=0.8', facecolor='yellow', 
+                   bbox=dict(boxstyle='round,pad=0.8', facecolor='yellow',
                             alpha=0.95, edgecolor='red', linewidth=3),
                    zorder=11, ha='center')
-    
+
     # Annotate top similar words clearly
     for i, (w, score) in enumerate(similar[:12], 1):
         if w in top_words[:show_n]:
             idx = top_words.index(w)
             ax.annotate(w, (coords[idx, 0], coords[idx, 1]),
-                       fontsize=14, fontweight='normal', 
-                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', 
+                       fontsize=14, fontweight='normal',
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue',
                                 alpha=0.85, edgecolor='navy', linewidth=1.5),
                        zorder=9)
-    
+
     # Label remaining words
     annotated = [target] + [w for w, _ in similar[:12]]
     for i, w in enumerate(top_words[:show_n]):
         if w not in annotated:
-            ax.text(coords[i, 0], coords[i, 1], w, 
+            ax.text(coords[i, 0], coords[i, 1], w,
                    fontsize=11, alpha=0.7, ha='center', va='center',
                    fontweight='normal')
-    
-    ax.set_title(f'Word2Vec Semantic Space: "{target}" and Similar Words\n' + 
+
+    ax.set_title(f'Word2Vec Semantic Space: "{target}" and Similar Words\n' +
                 f'Top {show_n} most frequent words (colored by topic)',
                 fontsize=18, fontweight='bold', pad=20)
     ax.set_xlabel('t-SNE Dimension 1', fontsize=16)
@@ -195,7 +222,7 @@ def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
     plt.tight_layout()
     plt.savefig(f'{out_dir}/word2vec_tsne.png', dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     # 2. LDA topics
     print("Creating topic plots...")
     topics_data = []
@@ -206,27 +233,27 @@ def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
             'words': [w for w, _ in words],
             'weights': [p for _, p in words]
         })
-    
+
     fig, axes = plt.subplots(n_topics, 1, figsize=(12, 3*n_topics))
     if n_topics == 1:
         axes = [axes]
-    
+
     for i, t in enumerate(topics_data):
         axes[i].barh(t['words'][::-1], t['weights'][::-1], color='steelblue', alpha=0.7)
         axes[i].set_xlabel('Probability')
         axes[i].set_title(f'Topic {i}: {", ".join(t["words"][:5])}', fontweight='bold')
         axes[i].grid(axis='x', alpha=0.3)
-    
+
     plt.tight_layout()
     plt.savefig(f'{out_dir}/lda_topics.png', dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     # 3. Collocations
     print("Creating collocation plot...")
     top20 = colls.most_common(20)
     words = [w for w, _ in top20]
     freqs = [f for _, f in top20]
-    
+
     fig, ax = plt.subplots(figsize=(12, 8))
     ax.barh(words[::-1], freqs[::-1], color='coral', alpha=0.7)
     ax.set_xlabel('Co-occurrence frequency')
@@ -235,25 +262,25 @@ def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
     plt.tight_layout()
     plt.savefig(f'{out_dir}/collocations.png', dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     # 4. Keyness heatmap
     print("Creating keyness heatmap...")
     top_key = keyness_df.groupby('topic').apply(lambda x: x.nlargest(15, 'keyness')).reset_index(drop=True)
     pivot = top_key.pivot_table(index='word', columns='topic', values='keyness', fill_value=0)
-    
+
     fig, ax = plt.subplots(figsize=(14, 10))
     sns.heatmap(pivot, cmap='YlOrRd', annot=False, cbar_kws={'label': 'Log-likelihood'}, ax=ax)
     ax.set_title('Keyness: Distinctive Words per Topic', fontsize=14, fontweight='bold')
     plt.tight_layout()
     plt.savefig(f'{out_dir}/keyness_heatmap.png', dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     # 5. Topic distribution
     print("Creating topic distribution...")
     counts = Counter(doc_topics)
     topics = sorted([t for t in counts.keys() if t >= 0])
     vals = [counts[t] for t in topics]
-    
+
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.bar(topics, vals, color='mediumpurple', alpha=0.7)
     ax.set_xlabel('Topic ID')
@@ -263,35 +290,244 @@ def make_plots(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
     plt.tight_layout()
     plt.savefig(f'{out_dir}/topic_distribution.png', dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     return topics_data
+
+
+def make_plots_16x10(w2v, lda, dictionary, sents, target, similar, colls, keyness_df,
+                     doc_topics, args, out_dir):
+    """Generate 16:10 aspect ratio visualizations for PowerPoint presentations.
+
+    Uses PowerPoint standard slide dimensions: 10" wide × 6.25" tall (16:10 ratio).
+    All fonts and elements are scaled up for readability when projected.
+    """
+    n_topics = args.topics
+    print("\nGenerating 16:10 PowerPoint format plots...")
+
+    # PowerPoint standard widescreen dimensions: 10" × 6.25"
+    # Using 2x scale for better quality: 20" × 12.5"
+    ppt_width = 20
+    ppt_height = 12.5
+
+    # 1. t-SNE word embedding plot (16:10 format)
+    print("Creating 16:10 t-SNE plot...")
+    vocab_freq = [(w, w2v.wv.get_vecattr(w, "count")) for w in w2v.wv.index_to_key]
+    top_words = [w for w, _ in sorted(vocab_freq, key=lambda x: x[1], reverse=True)[:args.top_words]]
+
+    vecs = np.array([w2v.wv[w] for w in top_words])
+    tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
+    coords = tsne.fit_transform(vecs)
+
+    # Color by topic
+    word_topics = {}
+    for w in top_words:
+        wid = dictionary.token2id.get(w)
+        if wid:
+            tprobs = lda.get_term_topics(wid, minimum_probability=0)
+            word_topics[w] = max(tprobs, key=lambda x: x[1])[0] if tprobs else -1
+        else:
+            word_topics[w] = -1
+
+    colors = [word_topics.get(w, -1) for w in top_words]
+
+    # Use proper 16:10 PowerPoint dimensions
+    fig, ax = plt.subplots(figsize=(ppt_width, ppt_height))
+
+    # Show only top 50 words for maximum clarity
+    show_n = min(50, len(top_words))
+    scatter = ax.scatter(coords[:show_n, 0], coords[:show_n, 1],
+                        c=colors[:show_n], cmap='tab10',
+                        alpha=0.4, s=300, edgecolors='black', linewidths=2)
+
+    # Annotate target word very prominently
+    if target in top_words[:show_n]:
+        idx = top_words.index(target)
+        ax.scatter(coords[idx, 0], coords[idx, 1], c='red', s=1200, marker='*',
+                  edgecolors='black', linewidths=5, zorder=10)
+        ax.annotate(target, (coords[idx, 0], coords[idx, 1]),
+                   fontsize=32, fontweight='bold', color='darkred',
+                   bbox=dict(boxstyle='round,pad=0.8', facecolor='yellow',
+                            alpha=0.95, edgecolor='red', linewidth=4),
+                   zorder=11, ha='center')
+
+    # Annotate top similar words clearly
+    for i, (w, score) in enumerate(similar[:12], 1):
+        if w in top_words[:show_n]:
+            idx = top_words.index(w)
+            ax.annotate(w, (coords[idx, 0], coords[idx, 1]),
+                       fontsize=24, fontweight='normal',
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue',
+                                alpha=0.85, edgecolor='navy', linewidth=2),
+                       zorder=9)
+
+    # Label remaining words with larger font
+    annotated = [target] + [w for w, _ in similar[:12]]
+    for i, w in enumerate(top_words[:show_n]):
+        if w not in annotated:
+            ax.text(coords[i, 0], coords[i, 1], w,
+                   fontsize=18, alpha=0.7, ha='center', va='center',
+                   fontweight='normal')
+
+    ax.set_title(f'Word2Vec Semantic Space: "{target}" and Similar Words\n' +
+                f'Top {show_n} most frequent words (colored by topic)',
+                fontsize=28, fontweight='bold', pad=25)
+    ax.set_xlabel('t-SNE Dimension 1', fontsize=24)
+    ax.set_ylabel('t-SNE Dimension 2', fontsize=24)
+    ax.tick_params(axis='both', labelsize=20)
+    ax.grid(True, alpha=0.4, linewidth=2, linestyle='-')
+    cbar = plt.colorbar(scatter, ax=ax, shrink=0.8)
+    cbar.set_label('Topic ID', fontsize=22)
+    cbar.ax.tick_params(labelsize=18)
+    plt.tight_layout()
+    plt.savefig(f'{out_dir}/word2vec_tsne_16x10.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    # 2. LDA topics (16:10 format)
+    print("Creating 16:10 topic plots...")
+    topics_data = []
+    for i in range(n_topics):
+        words = lda.show_topic(i, topn=10)  # Top 10 words per topic
+        topics_data.append({
+            'id': i,
+            'words': [w for w, _ in words],
+            'weights': [p for _, p in words]
+        })
+
+    # Use horizontal grid layout for better 16:10 fit
+    # Calculate grid dimensions: prefer wide layout
+    if n_topics <= 2:
+        ncols, nrows = n_topics, 1
+    elif n_topics <= 4:
+        ncols, nrows = 2, 2
+    elif n_topics <= 6:
+        ncols, nrows = 3, 2
+    else:
+        ncols, nrows = 3, (n_topics + 2) // 3
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(ppt_width, ppt_height))
+
+    # Flatten axes array for easier iteration
+    if n_topics == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten() if n_topics > 1 else [axes]
+
+    for i, t in enumerate(topics_data):
+        if i < len(axes):
+            axes[i].barh(t['words'][::-1], t['weights'][::-1], color='steelblue', alpha=0.75, height=0.65)
+            axes[i].set_xlabel('Probability', fontsize=16, fontweight='bold')
+            axes[i].set_title(f'Topic {i}', fontweight='bold', fontsize=18, pad=10)
+            axes[i].tick_params(axis='both', labelsize=14)
+            axes[i].grid(axis='x', alpha=0.3, linewidth=1.5)
+
+    # Hide extra subplots if topics don't fill the grid
+    for i in range(n_topics, len(axes)):
+        axes[i].set_visible(False)
+
+    plt.tight_layout(pad=2.0, h_pad=3.0, w_pad=2.5)
+    plt.savefig(f'{out_dir}/lda_topics_16x10.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    # 3. Collocations (16:10 format)
+    print("Creating 16:10 collocation plot...")
+    top20 = colls.most_common(20)
+    words = [w for w, _ in top20]
+    freqs = [f for _, f in top20]
+
+    fig, ax = plt.subplots(figsize=(ppt_width, ppt_height))
+    bars = ax.barh(words[::-1], freqs[::-1], color='coral', alpha=0.75, height=0.7)
+    ax.set_xlabel('Co-occurrence frequency', fontsize=22, fontweight='bold')
+    ax.set_title(f'Top 20 Collocations with "{target}"', fontsize=26, fontweight='bold', pad=20)
+    ax.grid(axis='x', alpha=0.35, linewidth=1.5)
+    ax.tick_params(axis='both', labelsize=18)
+
+    # Add value labels on bars for clarity
+    for i, (bar, freq) in enumerate(zip(bars, freqs[::-1])):
+        ax.text(freq, bar.get_y() + bar.get_height()/2, f' {freq}',
+               va='center', fontsize=16, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(f'{out_dir}/collocations_16x10.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    # 4. Keyness heatmap (16:10 format)
+    print("Creating 16:10 keyness heatmap...")
+    top_key = keyness_df.groupby('topic').apply(lambda x: x.nlargest(12, 'keyness')).reset_index(drop=True)
+    pivot = top_key.pivot_table(index='word', columns='topic', values='keyness', fill_value=0)
+
+    fig, ax = plt.subplots(figsize=(ppt_width, ppt_height))
+    sns.heatmap(pivot, cmap='YlOrRd', annot=False,
+                cbar_kws={'label': 'Log-likelihood'},
+                ax=ax, linewidths=0.5, linecolor='white')
+    ax.set_title('Keyness: Distinctive Words per Topic', fontsize=26, fontweight='bold', pad=20)
+    ax.set_xlabel('Topic', fontsize=22, fontweight='bold')
+    ax.set_ylabel('Word', fontsize=22, fontweight='bold')
+    ax.tick_params(axis='both', labelsize=18)
+
+    # Format colorbar
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=18)
+    cbar.set_label('Log-likelihood', fontsize=20, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(f'{out_dir}/keyness_heatmap_16x10.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    # 5. Topic distribution (16:10 format)
+    print("Creating 16:10 topic distribution...")
+    counts = Counter(doc_topics)
+    topics = sorted([t for t in counts.keys() if t >= 0])
+    vals = [counts[t] for t in topics]
+
+    fig, ax = plt.subplots(figsize=(ppt_width, ppt_height))
+    bars = ax.bar(topics, vals, color='mediumpurple', alpha=0.75, width=0.6)
+    ax.set_xlabel('Topic ID', fontsize=22, fontweight='bold')
+    ax.set_ylabel('Number of sentences', fontsize=22, fontweight='bold')
+    ax.set_title('Topic Distribution', fontsize=26, fontweight='bold', pad=20)
+    ax.grid(axis='y', alpha=0.35, linewidth=1.5)
+    ax.tick_params(axis='both', labelsize=20)
+
+    # Add value labels on top of bars
+    for bar, val in zip(bars, vals):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+               f'{val}', ha='center', va='bottom', fontsize=18, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(f'{out_dir}/topic_distribution_16x10.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print("16:10 PowerPoint format plots complete!")
 
 
 def main():
     """Main analysis pipeline."""
     args = parse_args()
-    
+
     # Setup output directory
     out_dir = Path(args.output)
     out_dir.mkdir(exist_ok=True)
     print(f"Output: {out_dir}")
-    
+
     # Load data
     print("Loading data...")
     sents, stops = load_data(args.input, args.stopwords)
     print(f"Loaded {len(sents)} sentences")
-    
+
     vocab = Counter()
     for s in sents:
         vocab.update(s)
     print(f"Vocab: {len(vocab)} unique lemmas")
     print(f"Avg sentence length: {np.mean([len(s) for s in sents]):.1f}")
-    
-    # Train models
-    w2v, lda, dictionary, corpus = train_models(sents, args.topics, args.window, args.min_count)
-    w2v.save(f'{out_dir}/{args.target}_w2v.model')
-    lda.save(f'{out_dir}/{args.target}_lda.model')
-    
+
+    # Train or load models
+    if args.load_models:
+        w2v, lda, dictionary, corpus = load_models(out_dir, args.target, sents)
+    else:
+        w2v, lda, dictionary, corpus = train_models(sents, args.topics, args.window, args.min_count)
+        w2v.save(f'{out_dir}/{args.target}_w2v.model')
+        lda.save(f'{out_dir}/{args.target}_lda.model')
+
     # Get similar words
     similar = []
     if args.target in w2v.wv:
@@ -301,31 +537,36 @@ def main():
             print(f"  {w}: {score:.3f}")
     else:
         print(f"Warning: '{args.target}' not in vocabulary")
-    
+
     # Get document topics
     doc_topics = []
     for bow in corpus:
         td = lda.get_document_topics(bow)
         doc_topics.append(max(td, key=lambda x: x[1])[0] if td else -1)
-    
+
     # Collocation analysis
     print("\nCollocation analysis...")
     colls = extract_collocations(sents, args.target, args.window)
-    
+
     # Keyness analysis
     print("Keyness analysis...")
     keyness_df = calc_keyness(sents, doc_topics, args.topics)
-    
+
     # Create plots
     print("\nGenerating plots...")
-    topics_data = make_plots(w2v, lda, dictionary, sents, args.target, similar, 
+    topics_data = make_plots(w2v, lda, dictionary, sents, args.target, similar,
                              colls, keyness_df, doc_topics, args, out_dir)
-    
+
+    # Generate 16:10 PowerPoint format plots if requested
+    if args.ppt_format:
+        make_plots_16x10(w2v, lda, dictionary, sents, args.target, similar,
+                        colls, keyness_df, doc_topics, args, out_dir)
+
     # Build HTML report
     print("\nBuilding HTML report...")
-    build_html(f'{out_dir}/analysis_report.html', args.target, sents, len(vocab), 
+    build_html(f'{out_dir}/analysis_report.html', args.target, sents, len(vocab),
                w2v, similar, topics_data, colls, keyness_df, args)
-    
+
     print("\n" + "="*60)
     print("Done!")
     print("="*60)
@@ -336,6 +577,14 @@ def main():
     print("  - collocations.png")
     print("  - keyness_heatmap.png")
     print("  - topic_distribution.png")
+    if args.ppt_format:
+        print("\n  PowerPoint 16:10 Format:")
+        print("  - word2vec_tsne_16x10.png")
+        print("  - lda_topics_16x10.png")
+        print("  - collocations_16x10.png")
+        print("  - keyness_heatmap_16x10.png")
+        print("  - topic_distribution_16x10.png")
+    print(f"\n  Models:")
     print(f"  - {args.target}_w2v.model")
     print(f"  - {args.target}_lda.model")
     print("="*60)
